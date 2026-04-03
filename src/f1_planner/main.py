@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os
 import sys
 import time
 import warnings
@@ -9,12 +10,18 @@ from pydantic import ValidationError
 from f1_planner.crew import F1Planner
 from f1_planner.logging_config import setup_logging
 from f1_planner.schemas import TripInput, post_process_outputs, validate_outputs
+from f1_planner.usage_metrics import (
+    UsageSnapshot,
+    estimate_openai_cost_usd,
+    extract_usage,
+    format_usage_summary,
+)
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
 
 def run():
-    """Run the crew with input validation, structured logging, and output checks."""
+    """Run the crew."""
     logger, run_id = setup_logging()
     logger.info("Starting F1 Planner run %s", run_id)
 
@@ -38,6 +45,11 @@ def run():
     inputs["nights"] = validated.nights
     logger.info("Validated inputs: %s", inputs)
 
+    pricing_model = os.environ.get("F1_PLANNER_PRICING_MODEL", "gpt-4o")
+    cumulative_usage = UsageSnapshot(0, 0, 0, 0, 0, False)
+    last_usage = cumulative_usage
+    last_attempt = 1
+
     max_attempts = 2
     for attempt in range(1, max_attempts + 1):
         start = time.perf_counter()
@@ -49,6 +61,26 @@ def run():
             elapsed = time.perf_counter() - start
             logger.error("Crew failed after %.1f s: %s", elapsed, e)
             raise
+
+        last_usage = extract_usage(result)
+        last_attempt = attempt
+        cumulative_usage = cumulative_usage.add(last_usage)
+        est = estimate_openai_cost_usd(last_usage, model=pricing_model)
+        logger.info(
+            "LLM usage attempt %d/%d: prompt=%d completion=%d total=%d requests=%d est_openai_usd=%s",
+            attempt,
+            max_attempts,
+            last_usage.prompt_tokens,
+            last_usage.completion_tokens,
+            last_usage.total_tokens,
+            last_usage.successful_requests,
+            f"{est:.4f}" if est is not None else "n/a",
+        )
+        if not last_usage.reported:
+            logger.info(
+                "LLM usage not reported for attempt %d (provider may omit token counts).",
+                attempt,
+            )
 
         logger.info("Post-processing outputs...")
         post_process_outputs()
@@ -71,6 +103,33 @@ def run():
                 "Attempt %d: %d file(s) still failing after %d attempts: %s",
                 attempt, len(failed), max_attempts, list(failed.keys()),
             )
+
+    cumulative_cost = estimate_openai_cost_usd(cumulative_usage, model=pricing_model)
+    print(
+        format_usage_summary(
+            last_usage,
+            last_attempt,
+            max_attempts,
+            cumulative_usage if last_attempt > 1 else None,
+            cumulative_cost if last_attempt > 1 else None,
+            pricing_model,
+        )
+    )
+    est_final = estimate_openai_cost_usd(last_usage, model=pricing_model)
+    if last_attempt > 1:
+        logger.info(
+            "Run total LLM usage (all attempts): total_tokens=%d est_openai_usd=%s",
+            cumulative_usage.total_tokens,
+            f"{cumulative_cost:.4f}" if cumulative_cost is not None else "n/a",
+        )
+    elif est_final is not None:
+        logger.info(
+            "Run total LLM usage: total_tokens=%d est_openai_usd=%.4f",
+            last_usage.total_tokens,
+            est_final,
+        )
+    elif not last_usage.reported:
+        logger.info("Run total LLM usage: not reported by provider")
 
     print("\n\n=== FINAL DECISION ===\n\n")
     print(result.raw)

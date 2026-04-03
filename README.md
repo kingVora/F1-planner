@@ -110,7 +110,8 @@ f1_planner/
 │   ├── crew.py                # Crew assembly — agents, tasks, max_iter settings
 │   ├── logging_config.py      # Per-run structured logging with correlation IDs
 │   ├── main.py                # Entry point — validation, logging, output checks
-│   └── schemas.py             # Pydantic TripInput model + post-run output validator
+│   ├── schemas.py             # Pydantic TripInput model + post-run output validator
+│   └── usage_metrics.py       # Token usage extraction + estimated OpenAI USD cost
 ├── .env.example               # Template for required API keys
 └── pyproject.toml
 ```
@@ -124,6 +125,12 @@ f1_planner/
 - **Output validation** — After the crew finishes, `validate_outputs()` reads each markdown file and checks for required content signals (prices, tier labels, cost estimates). Missing or suspect outputs are logged as warnings to surface hallucinated or truncated agent output.
 - **Auto-retry** — If output validation detects failures, the crew is automatically re-run (max 1 retry). Cached tool results mean the retry only costs LLM tokens, not additional SerpApi calls.
 - **Structured logging** — Every run gets a unique 8-character ID. All log events (cache hits, validation results, timing) are tagged with this ID and written to both console and `logs/run_<id>.log`.
+
+### LLM usage and estimated cost
+
+After each crew `kickoff()`, the run logs **prompt / completion / total tokens** from CrewAI’s `token_usage` and prints a short summary before the final decision. An **approximate OpenAI USD** line is computed from default **gpt-4o** per-1M rates (see [OpenAI pricing](https://openai.com/pricing)); refresh the defaults in `usage_metrics.py` when prices change. Override rates without code changes using `OPENAI_GPT4O_INPUT_PER_1M_USD` and `OPENAI_GPT4O_OUTPUT_PER_1M_USD`. When `cached_prompt_tokens` is non-zero, estimates split **non-cached** vs **cached** prompt tokens (cached is a subset of `prompt_tokens`, never added on top). If `OPENAI_GPT4O_CACHED_INPUT_PER_1M_USD` is unset, cached tokens use **50% of your configured input $/1M**, matching OpenAI’s published [GPT-4o prompt caching](https://openai.com/index/api-prompt-caching/) ratio ($1.25 vs $2.50 per 1M). Override with the env var for exact list pricing. Set `F1_PLANNER_PRICING_MODEL` if you standardize on another model name for pricing only.
+
+This estimate covers **OpenAI chat completions only**. **SerpApi, Serper, and other tools are billed separately** and are not included. Some providers may omit token counts; the summary will say so instead of guessing.
 
 ## Key design decisions
 
