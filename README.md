@@ -23,8 +23,7 @@ Given a source city, destination Grand Prix, trip duration, and budget, the crew
 - **Local Guide** — Plans a full day-by-day city itinerary that targets the daily allowance, distinguishing F1 session days from free days.
 - **Master Planner** — Synthesizes all reports into a single executive briefing. Uses only data from upstream agents — never fabricates activities or costs.
 
-All agents run on `openai/gpt-4o`. 
-All tasks run sequentially. Each downstream task receives its upstream tasks as context.
+All agents run on `openai/gpt-4o`. Earlier iterations tested `gpt-4o-mini` on tool-heavy agents for cost savings, but it produced summary-only outputs too frequently (empty accommodation reports, missing ticket data). The reliability cost exceeded the token savings. All tasks run sequentially. Each downstream task receives its upstream tasks as context.
 
 ## Tools
 
@@ -51,14 +50,19 @@ All tasks run sequentially. Each downstream task receives its upstream tasks as 
 pip install uv
 ```
 
-**2. Navigate to the project directory and install dependencies**
+**2. Clone and install dependencies**
 
 ```bash
-cd 3_crew/f1_planner
-crewai install
+git clone <repo-url> && cd f1-planner
+uv sync
 ```
 
-**3. Create a `.env` file** in the project root with your API keys:
+**3. Create a `.env` file** (a template is provided):
+
+```bash
+cp .env.example .env
+# then fill in your keys
+```
 
 ```
 OPENAI_API_KEY=sk-...
@@ -71,26 +75,26 @@ SERPER_API_KEY=...
 Edit the inputs in `src/f1_planner/main.py` to plan your trip:
 
 ```python
-inputs = {
+raw_inputs = {
     'source_city': 'Hyderabad',          # Your departure city
     'destination_city': 'Singapore',     # Grand Prix city
     'grand_prix': '2026 Singapore Grand Prix',
-    'days': 6,                           # Total trip length in days
+    'days': 6,                           # Total calendar days (arrival through departure)
     'amount': '200000',                  # Total budget (as a string)
     'currency_code': 'INR',             # Your preferred currency
     'current_year': str(datetime.now().year)
 }
 ```
 
-The `amount` and `currency_code` are passed through all agents — the budget planner, ticket strategist, and local guide all work in the same currency end-to-end.
+`days` is the total number of calendar days including arrival and departure. Hotel nights are computed automatically (`nights = days - 1`). For example, `days=6` means a 6-day / 5-night trip. The `amount` and `currency_code` are passed through all agents — the budget planner, ticket strategist, and local guide all work in the same currency end-to-end.
 
 ## Running
 
 ```bash
-crewai run
+crewai run          # or: uv run crewai run
 ```
 
-Outputs are written to the `output/` directory as Markdown files. The final `master_planner.md` is the single document to share or act on.
+Outputs are written to the `output/` directory as Markdown files. The final `master_planner.md` is the single document to share or act on. Per-run logs are written to `logs/`.
 
 ## Project structure
 
@@ -98,14 +102,28 @@ Outputs are written to the `output/` directory as Markdown files. The final `mas
 f1_planner/
 ├── src/f1_planner/
 │   ├── config/
-│   │   ├── agents.yaml       # Agent roles, goals, backstories, LLM
-│   │   └── tasks.yaml        # Task descriptions, expected outputs, context chains
+│   │   ├── agents.yaml        # Agent roles, goals, backstories, LLM
+│   │   └── tasks.yaml         # Task descriptions, expected outputs, context chains
 │   ├── tools/
-│   │   └── tools.py          # GoogleFlightsTool, GoogleHotelsPriceTool, CurrencyExchangeTool
-│   ├── crew.py               # Crew assembly — agents, tasks, max_iter settings
-│   └── main.py               # Entry point — trip inputs
+│   │   └── tools.py           # GoogleFlightsTool, GoogleHotelsPriceTool, CurrencyExchangeTool
+│   ├── cache.py               # Disk cache for SerpApi responses (diskcache, 6 h TTL)
+│   ├── crew.py                # Crew assembly — agents, tasks, max_iter settings
+│   ├── logging_config.py      # Per-run structured logging with correlation IDs
+│   ├── main.py                # Entry point — validation, logging, output checks
+│   └── schemas.py             # Pydantic TripInput model + post-run output validator
+├── .env.example               # Template for required API keys
 └── pyproject.toml
 ```
+
+## Reliability features
+
+- **Retry with exponential backoff** — All third-party API calls (SerpApi, exchange-rate API) are wrapped with `tenacity` retry (3 attempts, exponential wait). A single network glitch no longer crashes the entire pipeline.
+- **Disk cache** — SerpApi responses are cached to `.cache/serpapi/` with a 6-hour TTL, keyed on search parameters. Repeated dev runs reuse cached data, reducing SerpApi spend by ~90% during iteration.
+- **Input validation** — A Pydantic `TripInput` model validates all inputs (currency format, budget range, date format) before any API call is made. Invalid inputs fail fast with a clear error.
+- **Output post-processing** — Before validation, `post_process_outputs()` strips leaked CrewAI reasoning prefixes (`Thought:`, `Action:`) and expands single-line markdown tables back into readable multi-line format.
+- **Output validation** — After the crew finishes, `validate_outputs()` reads each markdown file and checks for required content signals (prices, tier labels, cost estimates). Missing or suspect outputs are logged as warnings to surface hallucinated or truncated agent output.
+- **Auto-retry** — If output validation detects failures, the crew is automatically re-run (max 1 retry). Cached tool results mean the retry only costs LLM tokens, not additional SerpApi calls.
+- **Structured logging** — Every run gets a unique 8-character ID. All log events (cache hits, validation results, timing) are tagged with this ID and written to both console and `logs/run_<id>.log`.
 
 ## Key design decisions
 

@@ -1,8 +1,40 @@
+import logging
 import os
-import requests
 from typing import Type
+
+import requests
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+from f1_planner.cache import get_cached, set_cached
+
+logger = logging.getLogger(__name__)
+
+
+def _call_serpapi(params: dict) -> dict:
+    """Call SerpApi with retry + cache. Returns the raw result dict."""
+    params_snapshot = dict(params)
+
+    cached = get_cached(params_snapshot)
+    if cached is not None:
+        return cached
+
+    from serpapi import GoogleSearch
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(Exception),
+        reraise=True,
+    )
+    def _do_call() -> dict:
+        search = GoogleSearch(params)
+        return search.get_dict()
+
+    result = _do_call()
+    set_cached(params_snapshot, result)
+    return result
 
 
 class CurrencyExchangeInput(BaseModel):
@@ -22,13 +54,23 @@ class CurrencyExchangeTool(BaseTool):
     def _run(self, from_currency: str, to_currency: str) -> str:
         from_code = from_currency.upper()
         to_code = to_currency.upper()
-        try:
+
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type(requests.RequestException),
+            reraise=True,
+        )
+        def _fetch_rate() -> dict:
             resp = requests.get(
                 f"https://open.er-api.com/v6/latest/{from_code}",
                 timeout=10,
             )
             resp.raise_for_status()
-            data = resp.json()
+            return resp.json()
+
+        try:
+            data = _fetch_rate()
         except Exception as e:
             return f"Error fetching exchange rate: {e}"
 
@@ -64,11 +106,6 @@ class GoogleFlightsTool(BaseTool):
 
     def _run(self, departure_id: str, arrival_id: str, outbound_date: str,
              return_date: str, currency: str = "USD") -> str:
-        try:
-            from serpapi import GoogleSearch
-        except ImportError:
-            return "Error: google-search-results package not installed. Run: pip install google-search-results"
-
         api_key = os.getenv("SERPAPI_API_KEY")
         if not api_key:
             return "Error: SERPAPI_API_KEY not found in environment variables."
@@ -82,12 +119,11 @@ class GoogleFlightsTool(BaseTool):
             "return_date": return_date,
             "currency": currency.upper(),
             "hl": "en",
-            "type": "1",  # round trip
+            "type": "1",
         }
 
         try:
-            search = GoogleSearch(params)
-            results = search.get_dict()
+            results = _call_serpapi(params)
         except Exception as e:
             return f"Error calling SerpApi Google Flights: {e}"
 
@@ -186,11 +222,6 @@ class GoogleHotelsPriceTool(BaseTool):
 
     def _run(self, query: str, check_in_date: str, check_out_date: str,
              currency: str = "USD", adults: int = 1, sort_by: str = "3") -> str:
-        try:
-            from serpapi import GoogleSearch
-        except ImportError:
-            return "Error: google-search-results package not installed. Run: pip install google-search-results"
-
         api_key = os.getenv("SERPAPI_API_KEY")
         if not api_key:
             return "Error: SERPAPI_API_KEY not found in environment variables."
@@ -208,8 +239,7 @@ class GoogleHotelsPriceTool(BaseTool):
         }
 
         try:
-            search = GoogleSearch(params)
-            results = search.get_dict()
+            results = _call_serpapi(params)
         except Exception as e:
             return f"Error calling SerpApi Google Hotels: {e}"
 

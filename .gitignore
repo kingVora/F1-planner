@@ -9,6 +9,8 @@ dist/
 build/
 .DS_Store
 output/
+.cache/
+logs/
 .pytest_cache/
 .ruff_cache/
 .coverage

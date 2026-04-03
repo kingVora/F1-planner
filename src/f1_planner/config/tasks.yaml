@@ -1,16 +1,19 @@
 flight_research_task:
   description: >
-    IMPORTANT: If a step does not require a tool call, include that reasoning
-    directly in your Final Answer. Do NOT output "Action: None" — either call
-    a tool or move on to the next step.
+    IMPORTANT: Do NOT output "Action: None" for reasoning-only steps — just
+    continue to the next step. Do NOT write your Final Answer until you have
+    received actual results from a tool call. For this task, your Final Answer
+    MUST include real data returned by a tool.
 
     1. **Race Dates:** Use your search tool to find the official race weekend
        dates for the {grand_prix} in {current_year}. Do not guess.
-    2. **Travel Dates:** The user wants to stay for {days} days total. Using
-       the race dates from step 1, determine the best arrival and departure
-       dates that centre the race weekend within the trip. State these dates
-       explicitly in your Final Answer — this is a reasoning step, not a
-       tool call.
+    2. **Travel Dates:** The user wants a {days}-day trip ({nights} hotel nights).
+       Day 1 is arrival, Day {days} is departure. Using the race dates from
+       step 1, choose arrival and departure dates that centre the race weekend
+       within these {days} calendar days. Search for flights using exactly
+       these two dates — do NOT search a second time with different dates.
+       This is a reasoning step — work it out internally and continue to the
+       next step.
     3. **Flight Routing:** Use the "Search Flight Prices" tool to find flights
        from {source_city} to the nearest major airport for the {grand_prix}.
        Use the arrival and departure dates from step 2, and set the currency
@@ -18,31 +21,38 @@ flight_research_task:
        Report the departure time, arrival time, airline, flight number, and
        price exactly as returned by the tool. Do NOT invent or estimate any
        flight details — use only what the tool returns.
+       NOTE: The tool returns round-trip prices but only outbound leg details.
+       State clearly in your report that prices are round-trip and that return
+       flight details (SIN → HYD) are available at the Google Flights booking
+       link.
     4. **Currency Conversion:** If any flight prices are returned in a different
        currency, convert them to {currency_code} and state the exchange rate used.
   expected_output: >
     A Flight Research Report in Markdown including:
     - Official race weekend dates for the {grand_prix}.
-    - Recommended arrival date and departure date for a {days}-day stay.
+    - Recommended arrival date and departure date for a {days}-day / {nights}-night stay.
     - Top flight options with airline, flight number, departure/arrival times,
       and price in {currency_code} as returned by the Search Flight Prices tool.
     - Booking link (the Google Flights URL returned by the tool, if available).
+    - A note that prices are round-trip and return flight details are
+      available at the Google Flights booking link.
     Do NOT wrap the output in code fences.
   agent: travel_logistics_agent
   output_file: output/flight_research.md
 
 accommodation_research_task:
   description: >
-    IMPORTANT: If a step does not require a tool call, include that reasoning
-    directly in your Final Answer. Do NOT output "Action: None" — either call
-    a tool or move on to the next step.
+    IMPORTANT: Do NOT output "Action: None" for reasoning-only steps — just
+    continue to the next step. Do NOT write your Final Answer until you have
+    received actual results from a tool call. For this task, your Final Answer
+    MUST include real data returned by a tool.
 
     Using the arrival and departure dates from the flight_research_task context,
-    find accommodation options for the user's {days}-night stay in
+    find accommodation options for the user's {nights}-night stay in
     {destination_city}.
 
     1. **Accommodation Analysis:** Use the "Search Hotel Prices" tool to find
-       hotels for {days} nights using the check-in and check-out dates from
+       hotels for {nights} nights using the check-in and check-out dates from
        flight_research_task, with currency set to {currency_code}. Run three
        separate searches — one per tier — using different queries and sort orders:
        - 'The Trackside': Search for "luxury hotel walking distance [circuit name]"
@@ -69,7 +79,7 @@ accommodation_research_task:
     - Three hotel recommendations (one per tier), each with:
       - Hotel name and nightly rate in {currency_code} as returned by the
         Search Hotel Prices tool.
-      - Total stay cost for {days} nights.
+      - Total stay cost for {nights} nights.
       - Booking link if available.
       - Commute time to the circuit.
     - A transport recommendation on whether to use public transport or
@@ -138,7 +148,7 @@ budget_planner_task:
     2. **Select Accommodation (top-down trial):** Try each hotel tier from 
        accommodation_research_task in this order: The Trackside, The Hub, The Value Play. 
        For each tier, calculate:
-         Total Fixed Costs = Flights + Tickets + (Nightly Rate x {days})
+         Total Fixed Costs = Flights + Tickets + (Nightly Rate x {nights})
        Accept the FIRST tier where Total Fixed Costs is at most 70% of 
        {amount} {currency_code} (leaving at least 30% for daily spending). 
        If NO tier satisfies this condition, select The Value Play anyway 
@@ -182,7 +192,7 @@ budget_planner_task:
   expected_output: >
     A Budget Feasibility Report in Markdown.
     - **Accommodation Selection Trial:** For each tier (Trackside, Hub, Value Play), 
-      show: Nightly Rate x {days} = accommodation total, then 
+      show: Nightly Rate x {nights} = accommodation total, then 
       Flights + Tickets + accommodation total = Fixed Costs, then 
       Fixed Costs / {amount} = X%. Mark which tier was selected and why.
     - **Fixed Costs Breakdown:** (Flights, Tickets, Hotel) with source noted.
@@ -215,8 +225,14 @@ local_guide_task:
     the search with a corrected input. Do NOT give up and list your planned
     actions as your Final Answer.
 
-    If a step does not require a tool call, include that reasoning directly
-    in your Final Answer. Do NOT output "Action: None".
+    Do NOT output "Action: None" for reasoning-only steps — just continue
+    to the next step.
+
+    COMPLETION GATE: Do NOT write your Final Answer until you have written a
+    complete itinerary for ALL {days} days. Your Final Answer MUST contain
+    exactly {days} "Estimated Day Cost:" lines — one per day. If you have
+    not yet written all {days} days, continue writing before submitting
+    your Final Answer.
 
     Your context already contains the complete output from flight_research_task
     (flight details, travel dates) and accommodation_research_task (hotel options,
