@@ -12,6 +12,7 @@ dependencies = [
 [project.scripts]
 f1_planner = "f1_planner.main:run"
 run_crew = "f1_planner.main:run"
+f1-plan = "f1_planner.cli:main"
 train = "f1_planner.main:train"
 replay = "f1_planner.main:replay"
 test = "f1_planner.main:test"

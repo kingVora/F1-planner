@@ -72,26 +72,31 @@ SERPER_API_KEY=...
 
 ## Configuration
 
-Edit the inputs in `src/f1_planner/main.py` to plan your trip:
+**CLI (recommended)** — pass trip fields as flags; values are validated with the same Pydantic `TripInput` model as the default run:
 
-```python
-raw_inputs = {
-    'source_city': 'Hyderabad',          # Your departure city
-    'destination_city': 'Singapore',     # Grand Prix city
-    'grand_prix': '2026 Singapore Grand Prix',
-    'days': 6,                           # Total calendar days (arrival through departure)
-    'amount': '200000',                  # Total budget (as a string)
-    'currency_code': 'INR',             # Your preferred currency
-    'current_year': str(datetime.now().year)
-}
+```bash
+uv run f1-plan --help
+uv run f1-plan \
+  --source-city Hyderabad \
+  --destination-city Singapore \
+  --grand-prix "2026 Singapore Grand Prix" \
+  --days 6 \
+  --amount 200000 \
+  --currency INR \
+  --year 2026
 ```
+
+Omitted flags use the same defaults as the example above (`--year` defaults to the current calendar year).
+
+**Default run** — `crewai run` / `uv run f1_planner` uses `default_inputs()` in `src/f1_planner/main.py`. Change that dict if you want a different fixed default without using the CLI.
 
 `days` is the total number of calendar days including arrival and departure. Hotel nights are computed automatically (`nights = days - 1`). For example, `days=6` means a 6-day / 5-night trip. The `amount` and `currency_code` are passed through all agents — the budget planner, ticket strategist, and local guide all work in the same currency end-to-end.
 
 ## Running
 
 ```bash
-crewai run          # or: uv run crewai run
+crewai run          # or: uv run crewai run  — default trip from main.py
+uv run f1-plan      # same pipeline, trip from CLI flags (see above)
 ```
 
 Outputs are written to the `output/` directory as Markdown files. The final `master_planner.md` is the single document to share or act on. Per-run logs are written to `logs/`.
@@ -109,7 +114,8 @@ f1_planner/
 │   ├── cache.py               # Disk cache for SerpApi responses (diskcache, 6 h TTL)
 │   ├── crew.py                # Crew assembly — agents, tasks, max_iter settings
 │   ├── logging_config.py      # Per-run structured logging with correlation IDs
-│   ├── main.py                # Entry point — validation, logging, output checks
+│   ├── main.py                # Default run + shared crew pipeline
+│   ├── cli.py                 # f1-plan — trip inputs from command-line flags
 │   ├── schemas.py             # Pydantic TripInput model + post-run output validator
 │   └── usage_metrics.py       # Token usage extraction + estimated OpenAI USD cost
 ├── .env.example               # Template for required API keys

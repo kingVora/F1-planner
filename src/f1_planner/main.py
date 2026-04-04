@@ -20,20 +20,22 @@ from f1_planner.usage_metrics import (
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
 
-def run():
-    """Run the crew."""
+def default_inputs() -> dict:
+    """Trip fields for ``run()`` / ``crewai run`` when no CLI is used."""
+    return {
+        "source_city": "Hyderabad",
+        "destination_city": "Singapore",
+        "grand_prix": "2026 Singapore Grand Prix",
+        "days": 6,
+        "amount": "200000",
+        "currency_code": "INR",
+        "current_year": str(datetime.now().year),
+    }
+
+
+def run_crew_with_trip_inputs(raw_inputs: dict) -> None:
     logger, run_id = setup_logging()
     logger.info("Starting F1 Planner run %s", run_id)
-
-    raw_inputs = {
-        'source_city': 'Hyderabad',
-        'destination_city': 'Singapore',
-        'grand_prix': '2026 Singapore Grand Prix',
-        'days': 6,
-        'amount': '200000',
-        'currency_code': 'INR',
-        'current_year': str(datetime.now().year),
-    }
 
     try:
         validated = TripInput(**raw_inputs)
@@ -134,6 +136,11 @@ def run():
     print("\n\n=== FINAL DECISION ===\n\n")
     print(result.raw)
     logger.info("Run %s complete", run_id)
+
+
+def run():
+    """Run the crew with default trip inputs (``crewai run`` / ``f1_planner`` script)."""
+    run_crew_with_trip_inputs(default_inputs())
 
 
 def train():
